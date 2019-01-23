@@ -2681,6 +2681,7 @@ main(int argc, const char **argv) {
   camsize[0] = 500;
   camsize[1] = 500;  
   */
+  cout << "right before Hale::init()" << endl;
   Hale::init();
   cout << "initialized hale" << endl;
   //Hale::debugging = 1;

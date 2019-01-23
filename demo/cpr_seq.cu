@@ -2682,6 +2682,7 @@ main(int argc, const char **argv) {
   camsize[1] = 500;  
   */
   Hale::init();
+  cout << "initialized hale" << endl;
   //Hale::debugging = 1;
   Hale::Scene scene;
   /* then create viewer (in order to create the OpenGL context) */

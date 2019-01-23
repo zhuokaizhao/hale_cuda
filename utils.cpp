@@ -215,6 +215,7 @@ init() {
 
   /* install GLFW error hander, then try glfwInit */
   glfwSetErrorCallback(errorGLFW);
+  std::cout << "line 218" << std::endl;
   iret = glfwInit();
   std::cout << "after glfwInit()" << std::endl;
   /*

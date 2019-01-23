@@ -25,7 +25,7 @@ LIB = libhale.a
 #TEEM = $(HOME)/teem-install
 # TEEM = /project/glk/rossc/code/teem-install
 # zhuokai: changed Teem directory on dali
-TEEM = /software/teem-trunk-el7-x86_64/include/
+TEEM = /software/teem-trunk-el6-x86_64/include/
 GLM = /software/glm-0.9-el6-x86_64/include/
 GLFW = /software/glfw-3.1-el6-x86_64/include/
 

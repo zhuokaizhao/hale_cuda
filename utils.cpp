@@ -211,10 +211,12 @@ init() {
 
   /* populate glEnumDesc (HEY figure out compile-time initialization) */
   glEnumDescInit();
+  cout << "after EnumDescInit()" << endl;
 
   /* install GLFW error hander, then try glfwInit */
   glfwSetErrorCallback(errorGLFW);
   iret = glfwInit();
+  cout << "after glfwInit()" << endl;
   /*
   fprintf(stderr, "%s: glfwInit returned %d (%s)\n", me.c_str(), iret,
           (GL_TRUE == iret

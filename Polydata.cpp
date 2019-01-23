@@ -151,7 +151,7 @@ Polydata::_init(std::string name) {
   glGenBuffers(_buffNum, _buff);
   if (debugging) {
     printf("# glGenBuffers(%u, &); -> %u", _buffNum, _buff[0]);
-    for (int bi=1; bi<_buffNum; bi++) {
+    for (int bi=1; bi<(signed)_buffNum; bi++) {
       printf(" %u", _buff[bi]);
     }
     printf("\n");

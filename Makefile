@@ -29,7 +29,7 @@ TEEM = /software/teem-trunk-el7-x86_64/include/
 GLM = /software/glm-0.9-el6-x86_64/include/
 GLFW = /software/glfw-3.1-el6-x86_64/include/
 
-IPATH = -I$(TEEM)/include -I$(GLM) -I$(GLFW)
+IPATH = -I$(TEEM) -I$(GLM) -I$(GLFW)
 
 CXX = g++
 AR = ar crs

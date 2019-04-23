@@ -7,13 +7,17 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from sklearn.decomposition import PCA
 
 def print_help():
     print('''    
     This program generates kymograph based on tracked pioneer neuron locations
     
     Usage:
-    python/pythonw getKymograph.py [mode -- synthetic or real, default synthetic] [tracked_file -- default coord_newtrack_pioneer_scale_old.txt]''')
+    python/pythonw getKymograph.py [mode -- synthetic or real, default synthetic] 
+                                   [tracked_file -- default coord_newtrack_pioneer_scale_old.txt]
+                                   [time shift -- default 0]
+                                   [noise std sigma -- default 1]''')
 
 # helper fucntion that computes curvatures
 def computeCurvature(x, y, z):
@@ -22,7 +26,9 @@ def computeCurvature(x, y, z):
     x_d = np.gradient(x)
     y_d = np.gradient(y)
     z_d = np.gradient(z)
+
     # r_d is the velocity, consistent with Fernet frame notation
+    # velocity in all x, y and z direction
     r_d = np.zeros((x_d.size, 3))
     for i in range(x_d.size):
         r_d[i, 0] = x_d[i]
@@ -52,6 +58,75 @@ def computeCurvature(x, y, z):
     curvature = T_d_norm / r_d_norm
 
     return curvature
+
+# helper function that computes pseudo side vector of sample points
+def computePseudoSideVector(allPoints):
+    pca = PCA(n_components=3)
+    pca.fit(allPoints)
+    # choose the second as pseudo side vector
+    psv = pca.components_[1]
+
+    return psv
+
+# helper function that computes the new characteristic we come up with
+def computeNewCharacter(x, y, z):
+    # construct Fernet frame and calculate curvature k
+    # get derivatives alone x, y and z with respect to time
+    x_d = np.gradient(x)
+    y_d = np.gradient(y)
+    z_d = np.gradient(z)
+
+    # r_d is the velocity, consistent with Fernet frame notation
+    # velocity in all x, y and z direction
+    r_d = np.zeros((x_d.size, 3))
+    for i in range(x_d.size):
+        r_d[i, 0] = x_d[i]
+        r_d[i, 1] = y_d[i]
+        r_d[i, 2] = z_d[i]
+
+    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
+    r_d_norm = np.sqrt(x_d*x_d + y_d*y_d + z_d*z_d)
+    # T is nx3 matrix, each row corresponds to a point
+    T = np.array([1/abs(r_d_norm)]).transpose() * r_d
+    # S
+    allPoints = np.zeros((len(x), 3))
+    allPoints[:, 0] = x
+    allPoints[:, 1] = y
+    allPoints[:, 2] = z
+    psv = computePseudoSideVector(allPoints)
+
+    # construct U matrix (unnormalized)
+    U = np.zeros((T.shape[0], 3))
+    for i in range(T.shape[0]):
+        # U = S cross T
+        U[i, :] = np.cross(psv, T[i, :])
+
+    # normalize U
+    Ux = U[:, 0]
+    Uy = U[:, 1]
+    Uz = U[:, 2]
+    U_norm = np.sqrt(Ux * Ux + Uy * Uy + Uz * Uz)
+    U = np.array([1/abs(U_norm)]).transpose() * U
+
+    # gradient of U
+    Ux = U[:, 0]
+    Uy = U[:, 1]
+    Uz = U[:, 2]
+    Ux_d = np.gradient(Ux)
+    Uy_d = np.gradient(Uy)
+    Uz_d = np.gradient(Uz)
+    U_d = np.zeros((Ux_d.size, 3))
+    for i in range(Ux_d.size):
+        U_d[i, 0] = Ux_d[i]
+        U_d[i, 1] = Uy_d[i]
+        U_d[i, 2] = Uz_d[i]
+
+    U_d_norm = np.sqrt(Ux_d*Ux_d + Uy_d*Uy_d + Uz_d*Uz_d)
+
+    # new characteristic
+    newK = U_d_norm / r_d_norm
+
+    return newK
 
 # Helper function that adds Gaussian noise to pioneer locations
 def addGaussianNoise(loc, sigma):
@@ -89,7 +164,7 @@ def main(argv):
     print_help()
     mode = argv[0] if len(argv) > 0 else 'synthetic'
     filename = argv[1] if len(argv) > 1 else 'coord_newtrack_pioneer_scale_old.txt'
-    timeShift = float(argv[2]) if len(argv) > 2 else 5
+    timeShift = float(argv[2]) if len(argv) > 2 else 0
     sigma = float(argv[3]) if len(argv) > 3 else 1
 
     # synthetic helix dataset
@@ -104,23 +179,61 @@ def main(argv):
         y =  np.sin(theta)
         z = theta
 
-        # make the plot
-        fig = plt.figure(1)
-        ax1 = fig.add_subplot(121, projection='3d')
-        ax1.plot(x, y, z, 'b', lw=2)
-        # An line through the centre of the helix
-        ax1.plot((0,0), (0,0), (-theta_max*0.2, theta_max * 1.2), color='k', lw=2)
+        allPoints = np.zeros((len(theta), 3))
+        allPoints[:, 0] = x
+        allPoints[:, 1] = y
+        allPoints[:, 2] = z
 
-        # get the curvature of both pioneer and follower
+        # add noise to current points
+        x_noised = addGaussianNoise(x, sigma)
+        y_noised = addGaussianNoise(y, sigma)
+        z_noised = addGaussianNoise(z, sigma)
+
+        # visualize pesudo-side vector
+        # get the pseudo side vector
+        # psv = computePseudoSideVector(allPoints)
+        # print(psv)
+        # origin = [0, 0, 0]
+        # X, Y, Z = zip(origin)
+        # U, V, W = zip(psv)
+        # ax1.quiver(X, Y, Z, U, V, W)
+
+        # get the curvature of synthetic dataset
         curvature = computeCurvature(x, y, z)
+        curvature_noised = computeCurvature(x_noised, y_noised, z_noised)
+        # get the newK of 
+        newK = computeNewCharacter(x, y, z)
+        newK_noised = computeNewCharacter(x_noised, y_noised, z_noised)
 
-        # generate kymograph
-        ax2 = fig.add_subplot(122)
-        ax2.plot(theta, curvature)
+        # make the plot
+        fig = plt.figure(1, figsize=(12, 6))
+        ax1 = fig.add_subplot(131, projection='3d')
+        ax1.plot(x, y, z, 'b', lw=2)
+        ax1.plot(x_noised, y_noised, z_noised, 'r', lw=2)
+        # An line through the centre of the helix
+        # ax1.plot((0,0), (0,0), (-theta_max*0.2, theta_max * 1.2), color='k', lw=2)
+        # plot the pseudo-side vector
+        
+        # generate two kinds of kymograph
+        ax2 = fig.add_subplot(132)
+        ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], curvature_noised[2:len(curvature_noised)-2])
+        plt.legend(('Original', 'Noised'))
         myTitle = 'Synthetic helix curvature vs time'
         plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
         plt.xlabel('theta')
         plt.ylabel('Curvature')
+
+        ax2 = fig.add_subplot(133)
+        ax2.plot(theta[2:len(theta)-2], newK[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], newK_noised[2:len(newK_noised)-2])
+        plt.legend(('Original', 'Noised'))
+        myTitle = 'Synthetic helix newK vs time'
+        plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
+        plt.xlabel('theta')
+        plt.ylabel('newK')
         
         plt.show()
 
@@ -146,9 +259,9 @@ def main(argv):
         allPositions_follower = allPositions_pioneer
         # all time stamp plus 10
         time_follower = allPositions_follower[:,0] + timeShift
-        x_follower = allPositions_follower[:,1] + addGaussianNoise(x_pioneer, sigma)
-        y_follower = allPositions_follower[:,2] + addGaussianNoise(y_pioneer, sigma)
-        z_follower = allPositions_follower[:,3] + addGaussianNoise(z_pioneer, sigma)
+        x_follower = addGaussianNoise(x_pioneer, sigma)
+        y_follower = addGaussianNoise(y_pioneer, sigma)
+        z_follower = addGaussianNoise(z_pioneer, sigma)
 
         # 3D scatter plot of followers
         plot3D(2, time_follower, x_follower, y_follower, z_follower, 'Follower locations vs t')
@@ -180,9 +293,9 @@ def main(argv):
                 allPositions_follower = allPositions_pioneer
                 # all time stamp plus 10
                 time_follower = allPositions_follower[:,0] + timeShift
-                x_follower = allPositions_follower[:,1] + addGaussianNoise(x_pioneer, sigma)
-                y_follower = allPositions_follower[:,2] + addGaussianNoise(y_pioneer, sigma)
-                z_follower = allPositions_follower[:,3] + addGaussianNoise(z_pioneer, sigma)
+                x_follower = addGaussianNoise(x_pioneer, sigma)
+                y_follower = addGaussianNoise(y_pioneer, sigma)
+                z_follower = addGaussianNoise(z_pioneer, sigma)
 
                 curvature_follower = computeCurvature(x_follower, y_follower, z_follower)
                 curSumRMS = curSumRMS + computeRMS(curvature_pioneer, curvature_follower)

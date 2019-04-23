@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
+from scipy import fftpack, ndimage, signal
 
 def print_help():
     print('''    
@@ -17,47 +18,24 @@ def print_help():
     python/pythonw getKymograph.py [mode -- synthetic or real, default synthetic] 
                                    [tracked_file -- default coord_newtrack_pioneer_scale_old.txt]
                                    [time shift -- default 0]
-                                   [noise std sigma -- default 1]''')
+                                   [noise std sigma_noise -- default 1]
+                                   [smooth std sigma_smooth -- default 10]''')
 
-# helper fucntion that computes curvatures
-def computeCurvature(x, y, z):
-    # construct Fernet frame and calculate curvature k
-    # get derivatives alone x, y and z with respect to time
-    x_d = np.gradient(x)
-    y_d = np.gradient(y)
-    z_d = np.gradient(z)
 
-    # r_d is the velocity, consistent with Fernet frame notation
-    # velocity in all x, y and z direction
-    r_d = np.zeros((x_d.size, 3))
-    for i in range(x_d.size):
-        r_d[i, 0] = x_d[i]
-        r_d[i, 1] = y_d[i]
-        r_d[i, 2] = z_d[i]
+# Helper function that computes derivative
+def computeDerivative(A):
+    Ax = A[:, 0]
+    Ay = A[:, 1]
+    Az = A[:, 2]
+    Ax_d = np.gradient(Ax)
+    Ay_d = np.gradient(Ay)
+    Az_d = np.gradient(Az)
+    A_d = np.zeros((Ax_d.size, 3))
+    A_d[:, 0] = Ax_d
+    A_d[:, 1] = Ay_d
+    A_d[:, 2] = Az_d
 
-    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
-    r_d_norm = np.sqrt(x_d*x_d + y_d*y_d + z_d*z_d)
-    T = np.array([1/abs(r_d_norm)]).transpose() * r_d
-    Tx = T[:, 0]
-    Ty = T[:, 1]
-    Tz = T[:, 2]
-
-    # find the norm of the derivative of T, which is ||T'(t)||
-    Tx_d = np.gradient(Tx)
-    Ty_d = np.gradient(Ty)
-    Tz_d = np.gradient(Tz)
-    T_d = np.zeros((Tx_d.size, 3))
-    for i in range(Tx_d.size):
-        T_d[i, 0] = Tx_d[i]
-        T_d[i, 1] = Ty_d[i]
-        T_d[i, 2] = Tz_d[i]
-
-    T_d_norm = np.sqrt(Tx_d * Tx_d + Ty_d * Ty_d + Tz_d * Tz_d)
-
-    # curvature k = ||T'(t)|| / ||r'(t)||
-    curvature = T_d_norm / r_d_norm
-
-    return curvature
+    return A_d
 
 # helper function that computes pseudo side vector of sample points
 def computePseudoSideVector(allPoints):
@@ -68,65 +46,124 @@ def computePseudoSideVector(allPoints):
 
     return psv
 
-# helper function that computes the new characteristic we come up with
-def computeNewCharacter(x, y, z):
-    # construct Fernet frame and calculate curvature k
-    # get derivatives alone x, y and z with respect to time
-    x_d = np.gradient(x)
-    y_d = np.gradient(y)
-    z_d = np.gradient(z)
+# Helper function that computes norm
+def computeNorm(A):
+    sum = np.zeros(A.shape[0])
+    for i in range(A.shape[1]):
+        sum = sum + A[:, i]*A[:, i]
 
-    # r_d is the velocity, consistent with Fernet frame notation
-    # velocity in all x, y and z direction
-    r_d = np.zeros((x_d.size, 3))
-    for i in range(x_d.size):
-        r_d[i, 0] = x_d[i]
-        r_d[i, 1] = y_d[i]
-        r_d[i, 2] = z_d[i]
+    norm = np.array([np.sqrt(sum)]).transpose()
 
-    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
-    r_d_norm = np.sqrt(x_d*x_d + y_d*y_d + z_d*z_d)
+    return norm
+
+# helper fucntion that computes curvatures
+def computeCurvature(allPoints):
+    # when the case data has time stamps
+    if (allPoints.shape[1] == 4):
+        newAllPoints = np.zeros[allPoints.shape[0], 3]
+        newAllPoints[:, :] = allPoints[:, 1:]
+        r_d = computeDerivative(newAllPoints)
+
+    # r_d is the velocity
+    r_d = computeDerivative(allPoints)
+    # norm of r_d
+    r_d_norm = computeNorm(r_d)
+
     # T is nx3 matrix, each row corresponds to a point
-    T = np.array([1/abs(r_d_norm)]).transpose() * r_d
-    # S
-    allPoints = np.zeros((len(x), 3))
-    allPoints[:, 0] = x
-    allPoints[:, 1] = y
-    allPoints[:, 2] = z
-    psv = computePseudoSideVector(allPoints)
+    T = 1/abs(r_d_norm) * r_d
+    # Compute the derivative of T
+    T_d = computeDerivative(T)
+    # norm of T, ||T||
+    T_d_norm = computeNorm(T_d)
 
-    # construct U matrix (unnormalized)
-    U = np.zeros((T.shape[0], 3))
-    for i in range(T.shape[0]):
-        # U = S cross T
-        U[i, :] = np.cross(psv, T[i, :])
+    # curvature k = ||T'(t)|| / ||r'(t)||
+    curvature = T_d_norm / r_d_norm
 
+    return curvature
+
+# helper function that computes the new characteristic we come up with
+def computeNewCharacter1(allPoints):
+    # when the case data has time stamps
+    if (allPoints.shape[1] == 4):
+        newAllPoints = np.zeros[allPoints.shape[0], 3]
+        newAllPoints[:, :] = allPoints[:, 1:]
+        r_d = computeDerivative(newAllPoints)
+
+    # r_d is the velocity
+    r_d = computeDerivative(allPoints)
+    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
+    # r_d_norm is nx3
+    r_d_norm = computeNorm(r_d)
+
+    # T is nx3 matrix, each row corresponds to a point
+    T = 1/abs(r_d_norm) * r_d
+    
+    # compute pseudo side vector S, which is also nx3
+    S = computePseudoSideVector(allPoints)
+
+    # construct U matrix (unnormalized), U = S cross T
+    U = np.cross(S, T)
     # normalize U
-    Ux = U[:, 0]
-    Uy = U[:, 1]
-    Uz = U[:, 2]
-    U_norm = np.sqrt(Ux * Ux + Uy * Uy + Uz * Uz)
-    U = np.array([1/abs(U_norm)]).transpose() * U
+    U_norm = computeNorm(U)
+    U = 1/abs(U_norm) * U
 
     # gradient of U
-    Ux = U[:, 0]
-    Uy = U[:, 1]
-    Uz = U[:, 2]
-    Ux_d = np.gradient(Ux)
-    Uy_d = np.gradient(Uy)
-    Uz_d = np.gradient(Uz)
-    U_d = np.zeros((Ux_d.size, 3))
-    for i in range(Ux_d.size):
-        U_d[i, 0] = Ux_d[i]
-        U_d[i, 1] = Uy_d[i]
-        U_d[i, 2] = Uz_d[i]
-
-    U_d_norm = np.sqrt(Ux_d*Ux_d + Uy_d*Uy_d + Uz_d*Uz_d)
+    U_d = computeDerivative(U)
+    # compute norm of U_d
+    U_d_norm = computeNorm(U_d)
 
     # new characteristic
     newK = U_d_norm / r_d_norm
 
     return newK
+
+def computeNewCharacter2(allPoints):
+    # when the case data has time stamps
+    if (allPoints.shape[1] == 4):
+        newAllPoints = np.zeros[allPoints.shape[0], 3]
+        newAllPoints[:, :] = allPoints[:, 1:]
+        r_d = computeDerivative(newAllPoints)
+
+    # r_d is the velocity
+    r_d = computeDerivative(allPoints)
+    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
+    # r_d_norm is nx3
+    r_d_norm = computeNorm(r_d)
+
+    # T is nx3 matrix, each row corresponds to a point
+    T = 1/abs(r_d_norm) * r_d
+    
+    # compute pseudo side vector S, which is also nx3
+    S = computePseudoSideVector(allPoints)
+
+    # construct U matrix (unnormalized), U = S cross T
+    U = np.cross(S, T)
+
+    # normalize U
+    U_norm = computeNorm(U)
+    U = 1/abs(U_norm) * U
+
+    # gradient of U
+    U_d = computeDerivative(U)
+    # compute norm of U_d
+    U_d_norm = computeNorm(U_d)
+
+    # compute L = T cross U
+    L = np.cross(T, U)
+    L_norm = computeNorm(L)
+    # normalized L
+    L = 1/abs(L_norm) * L
+
+    # compute the derivative of L
+    L_d = computeDerivative(L)
+    # norm of L_d
+    L_d_norm = computeNorm(L_d)
+
+    # new K = sqrt(U_d_norm^2 + L_d_norm^2) / r_d_norm^2
+    newK = np.sqrt(U_d_norm*U_d_norm + L_d_norm*L_d_norm) / r_d_norm
+
+    return newK
+
 
 # Helper function that adds Gaussian noise to pioneer locations
 def addGaussianNoise(loc, sigma):
@@ -165,7 +202,8 @@ def main(argv):
     mode = argv[0] if len(argv) > 0 else 'synthetic'
     filename = argv[1] if len(argv) > 1 else 'coord_newtrack_pioneer_scale_old.txt'
     timeShift = float(argv[2]) if len(argv) > 2 else 0
-    sigma = float(argv[3]) if len(argv) > 3 else 1
+    sigma_noise = float(argv[3]) if len(argv) > 3 else 0.1
+    sigma_smooth = float(argv[4]) if len(argv) > 4 else 10
 
     # synthetic helix dataset
     if mode == 'synthetic':
@@ -178,62 +216,93 @@ def main(argv):
         x =  np.cos(theta)
         y =  np.sin(theta)
         z = theta
-
+        # x = ndimage.gaussian_filter1d(x, sigma_smooth)
+        # y = ndimage.gaussian_filter1d(y, sigma_smooth)
+        # z = ndimage.gaussian_filter1d(z, sigma_smooth)
         allPoints = np.zeros((len(theta), 3))
         allPoints[:, 0] = x
         allPoints[:, 1] = y
         allPoints[:, 2] = z
+        ndimage.gaussian_filter1d(x, 1)
 
         # add noise to current points
-        x_noised = addGaussianNoise(x, sigma)
-        y_noised = addGaussianNoise(y, sigma)
-        z_noised = addGaussianNoise(z, sigma)
+        x_noised = addGaussianNoise(x, sigma_noise)
+        y_noised = addGaussianNoise(y, sigma_noise)
+        z_noised = addGaussianNoise(z, sigma_noise)
+        x_noised = ndimage.gaussian_filter1d(x_noised, sigma_smooth)
+        y_noised = ndimage.gaussian_filter1d(y_noised, sigma_smooth)
+        z_noised = ndimage.gaussian_filter1d(z_noised, sigma_smooth)
+        allPoints_noised = np.zeros((len(theta), 3))
+        allPoints_noised[:, 0] = x_noised
+        allPoints_noised[:, 1] = y_noised
+        allPoints_noised[:, 2] = z_noised
 
         # visualize pesudo-side vector
         # get the pseudo side vector
-        # psv = computePseudoSideVector(allPoints)
-        # print(psv)
-        # origin = [0, 0, 0]
-        # X, Y, Z = zip(origin)
-        # U, V, W = zip(psv)
-        # ax1.quiver(X, Y, Z, U, V, W)
+        S = computePseudoSideVector(allPoints)
+        origin = [0, 0, 0]
+        X, Y, Z = zip(origin)
+        U, V, W = zip(S)
 
         # get the curvature of synthetic dataset
-        curvature = computeCurvature(x, y, z)
-        curvature_noised = computeCurvature(x_noised, y_noised, z_noised)
-        # get the newK of 
-        newK = computeNewCharacter(x, y, z)
-        newK_noised = computeNewCharacter(x_noised, y_noised, z_noised)
+        curvature = computeCurvature(allPoints)
+        curvature_noised = computeCurvature(allPoints_noised)
+        curvature_noised = ndimage.gaussian_filter1d(curvature_noised, sigma_smooth)
+        
+        # get the newK1 of the synthetic dataset
+        newK1 = computeNewCharacter1(allPoints)
+        newK1_noised = computeNewCharacter1(allPoints_noised)
+        newK1_noised = ndimage.gaussian_filter1d(newK1_noised, sigma_smooth)
+
+        # get the newK2 of the synthetic dataset
+        newK2 = computeNewCharacter2(allPoints)
+        newK2_noised = computeNewCharacter2(allPoints_noised)
+        newK2_noised = ndimage.gaussian_filter1d(newK2_noised, sigma_smooth)
 
         # make the plot
-        fig = plt.figure(1, figsize=(12, 6))
-        ax1 = fig.add_subplot(131, projection='3d')
+        fig1 = plt.figure(1, figsize=(8, 6))
+        ax1 = fig1.add_subplot(111, projection='3d')
         ax1.plot(x, y, z, 'b', lw=2)
         ax1.plot(x_noised, y_noised, z_noised, 'r', lw=2)
-        # An line through the centre of the helix
-        # ax1.plot((0,0), (0,0), (-theta_max*0.2, theta_max * 1.2), color='k', lw=2)
         # plot the pseudo-side vector
+        ax1.quiver(X, Y, Z, U, V, W, color='k')
         
-        # generate two kinds of kymograph
-        ax2 = fig.add_subplot(132)
+        # generate three kinds of kymograph
+        # curvature based
+        fig2 = plt.figure(2, figsize=(8, 6))
+        ax2 = fig2.add_subplot(111)
         ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
         plt.plot(theta[2:len(theta)-2], curvature_noised[2:len(curvature_noised)-2])
         plt.legend(('Original', 'Noised'))
-        myTitle = 'Synthetic helix curvature vs time'
+        myTitle = 'Synthetic helix curvature (||T_d(t)|| / ||r_d(t)||) vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(curvature, curvature_noised))
         plt.title(myTitle)
         # plt.axis([0, theta_max, 0, 1])
         plt.xlabel('theta')
         plt.ylabel('Curvature')
 
-        ax2 = fig.add_subplot(133)
-        ax2.plot(theta[2:len(theta)-2], newK[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK_noised[2:len(newK_noised)-2])
+        # newK1 based
+        fig3 = plt.figure(3, figsize=(8, 6))
+        ax2 = fig3.add_subplot(111)
+        ax2.plot(theta[2:len(theta)-2], newK1[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], newK1_noised[2:len(newK1_noised)-2])
         plt.legend(('Original', 'Noised'))
-        myTitle = 'Synthetic helix newK vs time'
+        myTitle = 'Synthetic helix ||U_d(t)|| / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK1, newK1_noised))
         plt.title(myTitle)
         # plt.axis([0, theta_max, 0, 1])
         plt.xlabel('theta')
-        plt.ylabel('newK')
+        plt.ylabel('newK1')
+
+        # newK2 based
+        fig4 = plt.figure(4, figsize=(8, 6))
+        ax2 = fig4.add_subplot(111)
+        ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], newK2_noised[2:len(newK2_noised)-2])
+        plt.legend(('Original', 'Noised'))
+        myTitle = 'Synthetic helix sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK2, newK2_noised))
+        plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
+        plt.xlabel('theta')
+        plt.ylabel('newK2')
         
         plt.show()
 
@@ -259,24 +328,24 @@ def main(argv):
         allPositions_follower = allPositions_pioneer
         # all time stamp plus 10
         time_follower = allPositions_follower[:,0] + timeShift
-        x_follower = addGaussianNoise(x_pioneer, sigma)
-        y_follower = addGaussianNoise(y_pioneer, sigma)
-        z_follower = addGaussianNoise(z_pioneer, sigma)
+        x_follower = addGaussianNoise(x_pioneer, sigma_noise)
+        y_follower = addGaussianNoise(y_pioneer, sigma_noise)
+        z_follower = addGaussianNoise(z_pioneer, sigma_noise)
 
         # 3D scatter plot of followers
         plot3D(2, time_follower, x_follower, y_follower, z_follower, 'Follower locations vs t')
         
 
         # get the curvature of both pioneer and follower
-        curvature_pioneer = computeCurvature(x_pioneer, y_pioneer, z_pioneer)
-        curvature_follower = computeCurvature(x_follower, y_follower, z_follower)
+        curvature_pioneer = computeCurvature(allPositions_pioneer)
+        curvature_follower = computeCurvature(allPositions_pioneer)
 
         # generate kymograph
         plt.figure(3)
         plt.plot(time_pioneer, curvature_pioneer)
         plt.plot(time_follower, curvature_follower)
         plt.legend(('Pioneer', 'Follower'))
-        myTitle = 'Pioneer(real) and follower(synthetic) neurons positions vs time\nSigma=' + str(sigma) + '\nRMS =' + str(computeRMS(curvature_pioneer, curvature_follower))
+        myTitle = 'Pioneer(real) and follower(synthetic) neurons positions vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(curvature_pioneer, curvature_follower))
         plt.title(myTitle)
         plt.xlabel('t')
         plt.ylabel('Curvature')
@@ -293,11 +362,11 @@ def main(argv):
                 allPositions_follower = allPositions_pioneer
                 # all time stamp plus 10
                 time_follower = allPositions_follower[:,0] + timeShift
-                x_follower = addGaussianNoise(x_pioneer, sigma)
-                y_follower = addGaussianNoise(y_pioneer, sigma)
-                z_follower = addGaussianNoise(z_pioneer, sigma)
+                x_follower = addGaussianNoise(x_pioneer, sigma_noise)
+                y_follower = addGaussianNoise(y_pioneer, sigma_noise)
+                z_follower = addGaussianNoise(z_pioneer, sigma_noise)
 
-                curvature_follower = computeCurvature(x_follower, y_follower, z_follower)
+                curvature_follower = computeCurvature(allPositions_follower)
                 curSumRMS = curSumRMS + computeRMS(curvature_pioneer, curvature_follower)
             
             # get the average of sum

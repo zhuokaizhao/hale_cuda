@@ -208,7 +208,7 @@ def main(argv):
     # synthetic helix dataset
     if mode == 'synthetic':
         # number of data points that we are generating
-        n = 1000
+        n = 100
 
         # Plot a right-hand helix along the z-axis
         theta_max = 8 * np.pi
@@ -216,9 +216,6 @@ def main(argv):
         x =  np.cos(theta)
         y =  np.sin(theta)
         z = theta
-        # x = ndimage.gaussian_filter1d(x, sigma_smooth)
-        # y = ndimage.gaussian_filter1d(y, sigma_smooth)
-        # z = ndimage.gaussian_filter1d(z, sigma_smooth)
         allPoints = np.zeros((len(theta), 3))
         allPoints[:, 0] = x
         allPoints[:, 1] = y
@@ -303,6 +300,49 @@ def main(argv):
         # plt.axis([0, theta_max, 0, 1])
         plt.xlabel('theta')
         plt.ylabel('newK2')
+
+        # plots all together
+        fig5 = plt.figure(5, figsize=(10, 8))
+        ax1 = fig5.add_subplot(221, projection='3d')
+        ax1.plot(x, y, z, 'b', lw=2)
+        ax1.plot(x_noised, y_noised, z_noised, 'r', lw=2)
+        # plot the pseudo-side vector
+        ax1.quiver(X, Y, Z, U, V, W, color='k')
+        
+        # generate three kinds of kymograph
+        # curvature based
+        ax2 = fig5.add_subplot(222)
+        ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], curvature_noised[2:len(curvature_noised)-2])
+        plt.legend(('Original', 'Noised'))
+        myTitle = '(||T_d(t)|| / ||r_d(t)||) vs time'
+        plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
+        plt.xlabel('theta')
+        plt.ylabel('Curvature')
+
+        # newK1 based
+        ax2 = fig5.add_subplot(223)
+        ax2.plot(theta[2:len(theta)-2], newK1[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], newK1_noised[2:len(newK1_noised)-2])
+        plt.legend(('Original', 'Noised'))
+        myTitle = '||U_d(t)|| / ||r_d(t)|| vs time'
+        plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
+        plt.xlabel('theta')
+        plt.ylabel('newK1')
+
+        # newK2 based
+        ax2 = fig5.add_subplot(224)
+        ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
+        plt.plot(theta[2:len(theta)-2], newK2_noised[2:len(newK2_noised)-2])
+        plt.legend(('Original', 'Noised'))
+        myTitle = 'sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time'
+        plt.title(myTitle)
+        # plt.axis([0, theta_max, 0, 1])
+        plt.xlabel('theta')
+        plt.ylabel('newK2')
+
         
         plt.show()
 

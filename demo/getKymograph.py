@@ -197,6 +197,48 @@ def plot3D(i, time, x, y, z, myTitle):
     ax.set_zlabel('z')
     plt.title(myTitle)
 
+# helper function that performs the new smoothing method
+def mySmooth(allPoints_noised):
+    allPoints_noised_my = allPoints_noised
+    # first we take the PCA of all the points
+    # we know that the points lay in 3D so first three largest should be something we want to preserve
+    pca = PCA(n_components=3)
+    pca.fit(allPoints_noised)
+    # main moving directions
+    
+    # smooth all points
+    for i in range(allPoints_noised.size-1):
+        point1 = allPoints_noised[i, :]
+        point2 = allPoints_noised[i+1, :]
+        vector = point2 - point1
+        # we calculate because we want to preserve it later
+        length = np.sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2])
+
+        # substract all these non-import directions
+        for j in range(3, 10):
+            curDir = pca.components_[i]
+
+            # make the dot product to get the component in this non-important direction
+            sideDir = np.dot(vector, curDir)
+
+            # substract this sideDir from the vector
+            vectorNew = vector - sideDir
+            shortlength = np.sqrt(vectorNew[0]*vectorNew[0] + vectorNew[1]*vectorNew[1] + vectorNew[2]*vectorNew[2])
+
+            # scale the length to be initial length
+            scale = length / shortlength
+
+            # new point2
+            point2New = point1 + scale * vectorNew
+
+            # save to allPoints
+            allPoints_noised_my[i+1, :] = point2New
+
+    return allPoints_noised_my
+
+
+
+
 def main(argv):
     print_help()
     mode = argv[0] if len(argv) > 0 else 'synthetic'
@@ -204,6 +246,9 @@ def main(argv):
     timeShift = float(argv[2]) if len(argv) > 2 else 0
     sigma_noise = float(argv[3]) if len(argv) > 3 else 0.1
     sigma_smooth = float(argv[4]) if len(argv) > 4 else 10
+
+    # if we want all individual plots
+    plotIndividual = False
 
     # synthetic helix dataset
     if mode == 'synthetic':
@@ -226,95 +271,143 @@ def main(argv):
         x_noised = addGaussianNoise(x, sigma_noise)
         y_noised = addGaussianNoise(y, sigma_noise)
         z_noised = addGaussianNoise(z, sigma_noise)
-        x_noised = ndimage.gaussian_filter1d(x_noised, sigma_smooth)
-        y_noised = ndimage.gaussian_filter1d(y_noised, sigma_smooth)
-        z_noised = ndimage.gaussian_filter1d(z_noised, sigma_smooth)
+
+        # combine gaussian filtered noisy points together
         allPoints_noised = np.zeros((len(theta), 3))
         allPoints_noised[:, 0] = x_noised
         allPoints_noised[:, 1] = y_noised
         allPoints_noised[:, 2] = z_noised
 
-        # visualize pesudo-side vector
-        # get the pseudo side vector
-        S = computePseudoSideVector(allPoints)
-        origin = [0, 0, 0]
-        X, Y, Z = zip(origin)
-        U, V, W = zip(S)
+        # filter the noise with Gaussian filter
+        x_noised_gauss = ndimage.gaussian_filter1d(x_noised, sigma_smooth)
+        y_noised_gauss = ndimage.gaussian_filter1d(y_noised, sigma_smooth)
+        z_noised_gauss = ndimage.gaussian_filter1d(z_noised, sigma_smooth)
+        # combine gaussian filtered noisy points together
+        allPoints_noised_gauss = np.zeros((len(theta), 3))
+        allPoints_noised_gauss[:, 0] = x_noised_gauss
+        allPoints_noised_gauss[:, 1] = y_noised_gauss
+        allPoints_noised_gauss[:, 2] = z_noised_gauss
 
-        # get the curvature of synthetic dataset
+        # filter the noise with this new method
+        allPoints_noised_my = mySmooth(allPoints_noised)
+        x_noised_my = allPoints_noised_my[:, 0]
+        y_noised_my = allPoints_noised_my[:, 1]
+        z_noised_my = allPoints_noised_my[:, 2]
+
+        # curvature of original dataset
         curvature = computeCurvature(allPoints)
-        curvature_noised = computeCurvature(allPoints_noised)
-        curvature_noised = ndimage.gaussian_filter1d(curvature_noised, sigma_smooth)
+        # get the curvature of synthetic dataset after Gaussian smooth
+        curvature_noised_gauss = computeCurvature(allPoints_noised_gauss)
+        # also gaussian smooth the curvature result
+        curvature_noised_gauss = ndimage.gaussian_filter1d(curvature_noised_gauss, sigma_smooth)
+        # get the curvature of synthetic dataset after my smooth
+        curvature_noised_my = computeCurvature(allPoints_noised_my)
+        # also gaussian smooth the my result
+        curvature_noised_my = ndimage.gaussian_filter1d(curvature_noised_my, sigma_smooth)
         
-        # get the newK1 of the synthetic dataset
+        # newK1 of the original dataset
         newK1 = computeNewCharacter1(allPoints)
-        newK1_noised = computeNewCharacter1(allPoints_noised)
-        newK1_noised = ndimage.gaussian_filter1d(newK1_noised, sigma_smooth)
-
-        # get the newK2 of the synthetic dataset
-        newK2 = computeNewCharacter2(allPoints)
-        newK2_noised = computeNewCharacter2(allPoints_noised)
-        newK2_noised = ndimage.gaussian_filter1d(newK2_noised, sigma_smooth)
-
-        # make the plot
-        fig1 = plt.figure(1, figsize=(8, 6))
-        ax1 = fig1.add_subplot(111, projection='3d')
-        ax1.plot(x, y, z, 'b', lw=2)
-        ax1.plot(x_noised, y_noised, z_noised, 'r', lw=2)
-        # plot the pseudo-side vector
-        ax1.quiver(X, Y, Z, U, V, W, color='k')
+        # get the newK1 of the synthetic dataset after Gaussian smooth
+        newK1_noised_gauss = computeNewCharacter1(allPoints_noised_gauss)
+        # also gaussian smooth the newK1 result
+        newK1_noised_gauss = ndimage.gaussian_filter1d(newK1_noised_gauss, sigma_smooth)
+        # get the newK1 of the synthetic dataset after my smooth
+        newK1_noised_my = computeNewCharacter1(allPoints_noised_my)
+        # also gaussian smooth the newK1 result
+        newK1_noised_my = ndimage.gaussian_filter1d(newK1_noised_my, sigma_smooth)
         
-        # generate three kinds of kymograph
-        # curvature based
-        fig2 = plt.figure(2, figsize=(8, 6))
-        ax2 = fig2.add_subplot(111)
-        ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], curvature_noised[2:len(curvature_noised)-2])
-        plt.legend(('Original', 'Noised'))
-        myTitle = 'Synthetic helix curvature (||T_d(t)|| / ||r_d(t)||) vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(curvature, curvature_noised))
-        plt.title(myTitle)
-        # plt.axis([0, theta_max, 0, 1])
-        plt.xlabel('theta')
-        plt.ylabel('Curvature')
 
-        # newK1 based
-        fig3 = plt.figure(3, figsize=(8, 6))
-        ax2 = fig3.add_subplot(111)
-        ax2.plot(theta[2:len(theta)-2], newK1[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK1_noised[2:len(newK1_noised)-2])
-        plt.legend(('Original', 'Noised'))
-        myTitle = 'Synthetic helix ||U_d(t)|| / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK1, newK1_noised))
-        plt.title(myTitle)
-        # plt.axis([0, theta_max, 0, 1])
-        plt.xlabel('theta')
-        plt.ylabel('newK1')
+        # newK2 of original dataset
+        newK2 = computeNewCharacter2(allPoints)
+        # get the newK2 of the synthetic dataset after Gaussian smooth
+        newK2_noised_gauss = computeNewCharacter2(allPoints_noised_gauss)
+        # also gaussian smooth the newK2 result
+        newK2_noised_gauss = ndimage.gaussian_filter1d(newK2_noised_gauss, sigma_smooth)
+        # get the newK2 of the synthetic dataset after Gaussian smooth
+        newK2_noised_my = computeNewCharacter2(allPoints_noised_my)
+        # also gaussian smooth the newK2 result
+        newK2_noised_my = ndimage.gaussian_filter1d(newK2_noised_my, sigma_smooth)
 
-        # newK2 based
-        fig4 = plt.figure(4, figsize=(8, 6))
-        ax2 = fig4.add_subplot(111)
-        ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK2_noised[2:len(newK2_noised)-2])
-        plt.legend(('Original', 'Noised'))
-        myTitle = 'Synthetic helix sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK2, newK2_noised))
-        plt.title(myTitle)
-        # plt.axis([0, theta_max, 0, 1])
-        plt.xlabel('theta')
-        plt.ylabel('newK2')
+
+
+        '''
+        fig1 to fig4 are individual plots, fig 5 is all combined plots
+        '''
+        if (plotIndividual):
+            # make the plot
+            fig1 = plt.figure(1, figsize=(8, 6))
+            ax1 = fig1.add_subplot(111, projection='3d')
+            ax1.plot(x, y, z, 'b', lw=2)
+            ax1.plot(x_noised_gauss, y_noised_gauss, z_noised, 'r', lw=2)
+            # plot the pseudo-side vector
+            # get the pseudo side vector first
+            S = computePseudoSideVector(allPoints)
+            origin = [0, 0, 0]
+            X, Y, Z = zip(origin)
+            U, V, W = zip(S)
+            ax1.quiver(X, Y, Z, U, V, W, color='k')
+            
+            # generate three kinds of kymograph
+            # curvature based
+            fig2 = plt.figure(2, figsize=(8, 6))
+            ax2 = fig2.add_subplot(111)
+            ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
+            plt.plot(theta[2:len(theta)-2], curvature_noised_gauss[2:len(curvature_noised_gauss)-2])
+            plt.legend(('Original', 'Noised'))
+            myTitle = 'Synthetic helix curvature (||T_d(t)|| / ||r_d(t)||) vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(curvature, curvature_noised_gauss))
+            plt.title(myTitle)
+            # plt.axis([0, theta_max, 0, 1])
+            plt.xlabel('theta')
+            plt.ylabel('Curvature')
+
+            # newK1 based
+            fig3 = plt.figure(3, figsize=(8, 6))
+            ax2 = fig3.add_subplot(111)
+            ax2.plot(theta[2:len(theta)-2], newK1[2:len(curvature)-2])
+            plt.plot(theta[2:len(theta)-2], newK1_noised_gauss[2:len(newK1_noised_gauss)-2])
+            plt.legend(('Original', 'Noised'))
+            myTitle = 'Synthetic helix ||U_d(t)|| / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK1, newK1_noised_gauss))
+            plt.title(myTitle)
+            # plt.axis([0, theta_max, 0, 1])
+            plt.xlabel('theta')
+            plt.ylabel('newK1')
+
+            # newK2 based
+            fig4 = plt.figure(4, figsize=(8, 6))
+            ax2 = fig4.add_subplot(111)
+            ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
+            plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
+            plt.legend(('Original', 'Noised'))
+            myTitle = 'Synthetic helix sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK2, newK2_noised_gauss))
+            plt.title(myTitle)
+            # plt.axis([0, theta_max, 0, 1])
+            plt.xlabel('theta')
+            plt.ylabel('newK2')
 
         # plots all together
         fig5 = plt.figure(5, figsize=(10, 8))
         ax1 = fig5.add_subplot(221, projection='3d')
+        # original unnoised data
         ax1.plot(x, y, z, 'b', lw=2)
-        ax1.plot(x_noised, y_noised, z_noised, 'r', lw=2)
+        # noised data after gaussian smooth
+        ax1.plot(x_noised_gauss, y_noised_gauss, z_noised_gauss, 'r', lw=2)
+        # noised data after my smooth method
+        ax1.plot(x_noised_my, y_noised_my, z_noised_my, 'r', lw=2)
         # plot the pseudo-side vector
+        # get the pseudo side vector first
+        S = computePseudoSideVector(allPoints)
+        origin = [0, 0, 0]
+        X, Y, Z = zip(origin)
+        U, V, W = zip(S)
         ax1.quiver(X, Y, Z, U, V, W, color='k')
         
         # generate three kinds of kymograph
         # curvature based
         ax2 = fig5.add_subplot(222)
         ax2.plot(theta[2:len(theta)-2], curvature[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], curvature_noised[2:len(curvature_noised)-2])
-        plt.legend(('Original', 'Noised'))
+        plt.plot(theta[2:len(theta)-2], curvature_noised_gauss[2:len(curvature_noised_gauss)-2])
+        plt.plot(theta[2:len(theta)-2], curvature_noised_my[2:len(curvature_noised_my)-2])
+        plt.legend(('Original', 'Noised after Gauss smooth', 'Noised after my smooth'))
         myTitle = '(||T_d(t)|| / ||r_d(t)||) vs time'
         plt.title(myTitle)
         # plt.axis([0, theta_max, 0, 1])
@@ -324,8 +417,9 @@ def main(argv):
         # newK1 based
         ax2 = fig5.add_subplot(223)
         ax2.plot(theta[2:len(theta)-2], newK1[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK1_noised[2:len(newK1_noised)-2])
-        plt.legend(('Original', 'Noised'))
+        plt.plot(theta[2:len(theta)-2], newK1_noised_gauss[2:len(newK1_noised_gauss)-2])
+        plt.plot(theta[2:len(theta)-2], newK1_noised_my[2:len(newK1_noised_my)-2])
+        plt.legend(('Original', 'Noised after Gauss smooth', 'Noised after my smooth'))
         myTitle = '||U_d(t)|| / ||r_d(t)|| vs time'
         plt.title(myTitle)
         # plt.axis([0, theta_max, 0, 1])
@@ -335,15 +429,16 @@ def main(argv):
         # newK2 based
         ax2 = fig5.add_subplot(224)
         ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK2_noised[2:len(newK2_noised)-2])
-        plt.legend(('Original', 'Noised'))
+        plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
+        plt.plot(theta[2:len(theta)-2], newK2_noised_my[2:len(newK2_noised_my)-2])
+        plt.legend(('Original', 'Noised after Gauss smooth', 'Noised after my smooth'))
         myTitle = 'sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time'
         plt.title(myTitle)
         # plt.axis([0, theta_max, 0, 1])
         plt.xlabel('theta')
         plt.ylabel('newK2')
 
-        
+        # show the images
         plt.show()
 
     # real data mode

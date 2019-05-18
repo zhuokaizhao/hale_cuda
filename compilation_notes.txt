@@ -1,0 +1,32 @@
+
+# The notes includes some differences compared to the README, because Midway environment has slightly changed by then
+
+Log into midway.rcc.uchicago.edu (Notice that logging into midway2 or dali-login may cause problems because sviz node is located on midway1, which has different modules than midway2 or dali-login)
+
+1. Load module cuda/8.0, gcc and teem
+2. Inside hale_cuda, run make and make install
+3. Insie demo, run:
+
+####################### For cpr_seq.cu ########################
+
+nvcc -std=c++11 -I/home/zhuokai/hale_cuda/hale-install/include -I/software/teem-trunk-el6-x86_64/include -I/software/glm-0.9-el6-x86_64/include -I/software/glfw-3.1-el6-x86_64/include cpr_seq.cu lib/Image.cpp -o cpr_seq -L/home/zhuokai/hale_cuda/hale-install/lib -L/software/teem-trunk-el6-x86_64/lib -L/software/glm-0.9-el6-x86_64/lib64 -L/software/glfw-3.1-el6-x86_64/lib64 -lglfw3 -lGL -lm -ldl -lXinerama -lXrandr -lXi -lXcursor -lX11 -lXxf86vm -lpthread -lhale -lteem -lpng -lz -lbz2 -lGL -lX11 -lXxf86vm -lXrandr -lpthread -lXi
+
+Now the compilation for cpr_seq is completed. To run the program, inside demo/, run:
+
+vglrun ./cpr_seq -isize 200 200 -swidth 1 -sstep 0.01 -i coord_newtrack_pioneer_scale_old.txt -pref /project/glk/vprince/16-05-05/vis/hp/hp2
+
+################# For tex_volume_test2file.cu #################
+
+nvcc -std=c++11 -I/home/zhuokai/hale_cuda/hale-install/include -I/software/teem-trunk-el6-x86_64/include -I/software/glm-0.9-el6-x86_64/include -I/software/glfw-3.1-el6-x86_64/include tex_volume_test2file.cu lib/Image.cpp -o tex_volume_test2file -L/home/zhuokai/hale_cuda/hale-install/lib -L/software/teem-trunk-el6-x86_64/lib -L/software/glm-0.9-el6-x86_64/lib64 -L/software/glfw-3.1-el6-x86_64/lib64 -lglfw3 -lGL -lm -ldl -lXinerama -lXrandr -lXi -lXcursor -lX11 -lXxf86vm -lpthread -lhale -lteem -lpng -lz -lbz2 -lGL -lX11 -lXxf86vm -lXrandr -lpthread -lXi
+
+Now the compilation for tex_volume_test2file is completed. To run the program, inside demo/, run:
+
+vglrun ./tex_volume_test2file -i 0-smlhp.nrrd -i2 1-sml.nrrd -fr 2453.95 1850.87 4520.28 -at 2575.22 2259.17 461.956 -up -0.996969 0.0745429 -0.0222908 -nc -400 -fc 400 -fov 18 -isize 726 528 -ldir -1 -1 -2 -step 1.5 -iso 1800 -thick 0.5
+
+################# For cpr_seq_savespacetime.cu #################
+
+nvcc -std=c++11 -I/home/zhuokai/hale_cuda/hale-install/include -I/software/teem-trunk-el6-x86_64/include -I/software/glm-0.9-el6-x86_64/include -I/software/glfw-3.1-el6-x86_64/include cpr_seq_savespacetime.cu lib/Image.cpp -o cpr_seq_savespacetime -L/home/zhuokai/hale_cuda/hale-install/lib -L/software/teem-trunk-el6-x86_64/lib -L/software/glm-0.9-el6-x86_64/lib64 -L/software/glfw-3.1-el6-x86_64/lib64 -lglfw3 -lGL -lm -ldl -lXinerama -lXrandr -lXi -lXcursor -lX11 -lXxf86vm -lpthread -lhale -lteem -lpng -lz -lbz2 -lGL -lX11 -lXxf86vm -lXrandr -lpthread -lXi
+
+Now the compilation for tex_volume_test2file is completed. To run the program, inside demo/, run:
+
+vglrun ./cpr_seq_savespacetime -isize 200 200 -swidth 1 -sstep 0.01 -i coord_newtrack_pioneer_all_scaled.txt -pref /project/glk/vprince/16-05-05/vis/hp/hp2scivisdata/hp2

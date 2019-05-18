@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from scipy import fftpack, ndimage, signal
+import math
 
 def print_help():
     print('''    
@@ -23,6 +24,7 @@ def print_help():
 
 
 # Helper function that computes derivative
+# A is in three-dimension, first column is x, second column is y, third column is z
 def computeDerivative(A):
     Ax = A[:, 0]
     Ay = A[:, 1]
@@ -42,9 +44,9 @@ def computePseudoSideVector(allPoints):
     pca = PCA(n_components=3)
     pca.fit(allPoints)
     # choose the second as pseudo side vector
-    psv = pca.components_[1]
+    S = pca.components_[1]
 
-    return psv
+    return S
 
 # Helper function that computes norm
 def computeNorm(A):
@@ -88,9 +90,10 @@ def computeNewCharacter1(allPoints):
         newAllPoints = np.zeros[allPoints.shape[0], 3]
         newAllPoints[:, :] = allPoints[:, 1:]
         r_d = computeDerivative(newAllPoints)
+    else:
+        # r_d is the velocity
+        r_d = computeDerivative(allPoints)
 
-    # r_d is the velocity
-    r_d = computeDerivative(allPoints)
     # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
     # r_d_norm is nx3
     r_d_norm = computeNorm(r_d)
@@ -117,58 +120,58 @@ def computeNewCharacter1(allPoints):
 
     return newK
 
-def computeNewCharacter2(allPoints):
-    # when the case data has time stamps
-    if (allPoints.shape[1] == 4):
-        newAllPoints = np.zeros[allPoints.shape[0], 3]
-        newAllPoints[:, :] = allPoints[:, 1:]
-        r_d = computeDerivative(newAllPoints)
+# this does not really make sense
+# def computeNewCharacter2(allPoints):
+#     # when the case data has time stamps
+#     if (allPoints.shape[1] == 4):
+#         newAllPoints = np.zeros[allPoints.shape[0], 3]
+#         newAllPoints[:, :] = allPoints[:, 1:]
+#         r_d = computeDerivative(newAllPoints)
 
-    # r_d is the velocity
-    r_d = computeDerivative(allPoints)
-    # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
-    # r_d_norm is nx3
-    r_d_norm = computeNorm(r_d)
+#     # r_d is the velocity
+#     r_d = computeDerivative(allPoints)
+#     # find the unit tangent vector T, which is pointing in the same direction as v and is a unit vector
+#     # r_d_norm is nx3
+#     r_d_norm = computeNorm(r_d)
 
-    # T is nx3 matrix, each row corresponds to a point
-    T = 1/abs(r_d_norm) * r_d
+#     # T is nx3 matrix, each row corresponds to a point
+#     T = 1/abs(r_d_norm) * r_d
     
-    # compute pseudo side vector S, which is also nx3
-    S = computePseudoSideVector(allPoints)
+#     # compute pseudo side vector S, which is also nx3
+#     S = computePseudoSideVector(allPoints)
 
-    # construct U matrix (unnormalized), U = S cross T
-    U = np.cross(S, T)
+#     # construct U matrix (unnormalized), U = S cross T
+#     U = np.cross(S, T)
 
-    # normalize U
-    U_norm = computeNorm(U)
-    U = 1/abs(U_norm) * U
+#     # normalize U
+#     U_norm = computeNorm(U)
+#     U = 1/abs(U_norm) * U
 
-    # gradient of U
-    U_d = computeDerivative(U)
-    # compute norm of U_d
-    U_d_norm = computeNorm(U_d)
+#     # gradient of U
+#     U_d = computeDerivative(U)
+#     # compute norm of U_d
+#     U_d_norm = computeNorm(U_d)
 
-    # compute L = T cross U
-    L = np.cross(T, U)
-    L_norm = computeNorm(L)
-    # normalized L
-    L = 1/abs(L_norm) * L
+#     # compute L = T cross U
+#     L = np.cross(T, U)
+#     L_norm = computeNorm(L)
+#     # normalized L
+#     L = 1/abs(L_norm) * L
 
-    # compute the derivative of L
-    L_d = computeDerivative(L)
-    # norm of L_d
-    L_d_norm = computeNorm(L_d)
+#     # compute the derivative of L
+#     L_d = computeDerivative(L)
+#     # norm of L_d
+#     L_d_norm = computeNorm(L_d)
 
-    # new K = sqrt(U_d_norm^2 + L_d_norm^2) / r_d_norm^2
-    newK = np.sqrt(U_d_norm*U_d_norm + L_d_norm*L_d_norm) / r_d_norm
+#     # new K = sqrt(U_d_norm^2 + L_d_norm^2) / r_d_norm^2
+#     newK = np.sqrt(U_d_norm*U_d_norm + L_d_norm*L_d_norm) / r_d_norm
 
-    return newK
+#     return newK
 
 
 # Helper function that adds Gaussian noise to pioneer locations
-def addGaussianNoise(loc, sigma):
+def addGaussianNoise(loc, mean, sigma):
     # get the information about the image
-    mean = 0
     gauss = np.random.normal(mean, sigma, loc.size)
     loc_noisy = loc + gauss
     
@@ -197,47 +200,148 @@ def plot3D(i, time, x, y, z, myTitle):
     ax.set_zlabel('z')
     plt.title(myTitle)
 
-# helper function that performs the new smoothing method
-def mySmooth(allPoints_noised):
-    allPoints_noised_my = allPoints_noised
-    # first we take the PCA of all the points
-    # we know that the points lay in 3D so first three largest should be something we want to preserve
-    pca = PCA(n_components=3)
-    pca.fit(allPoints_noised)
-    # main moving directions
+# helper function that computes the Euclidean distance between two points
+def distance(p1, p2):
+    dist = 0
+    # dimension check
+    if (len(p1) != len(p2)):
+        print('Could not compute distance between p1 and p2, incompatible dimension')
+        return dist
+
+    sum = 0
+    for i in range(len(p1)):
+        sum = sum + (p1[i]-p2[i])**2
     
-    # smooth all points
-    for i in range(allPoints_noised.size-1):
-        point1 = allPoints_noised[i, :]
-        point2 = allPoints_noised[i+1, :]
-        vector = point2 - point1
-        # we calculate because we want to preserve it later
-        length = np.sqrt(vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2])
+    dist = np.sqrt(sum)
 
-        # substract all these non-import directions
-        for j in range(3, 10):
-            curDir = pca.components_[i]
+    return dist
 
-            # make the dot product to get the component in this non-important direction
-            sideDir = np.dot(vector, curDir)
+# helper function that is the Gaussian kernel
+def gaussian(x, sigma):
+    g = 1.0/(2 * math.pi * (sigma**2)) * math.exp(-(x**2)/(2*sigma**2))
+    return g
 
-            # substract this sideDir from the vector
-            vectorNew = vector - sideDir
-            shortlength = np.sqrt(vectorNew[0]*vectorNew[0] + vectorNew[1]*vectorNew[1] + vectorNew[2]*vectorNew[2])
+# helper function that performs the customized Bilateral filter
+# it uses the new characteristic newK1 as the "pixel intensity"
+# filter the newK1 and recover points from newK1
+# def customized_Bilateral(allPoints_noised, allFeatures, diameter, sigma_dist, sigma_feature):
+#     # initialize the filtered result
+#     allPoints_filtered = np.zeros(allPoints_noised.shape)
+#     allFeatures_filterd = np.zeros(allFeatures.shape)
+#     curFiltered = 0
 
-            # scale the length to be initial length
-            scale = length / shortlength
+#     # iterate through all the points
+#     for t in range(len(allPoints_noised)):
+#         curPoint = allPoints_noised[t]
+#         wp = 0
 
-            # new point2
-            point2New = point1 + scale * vectorNew
+#         # radius, which is used in the loop 
+#         radius = diameter/2
+#         for i in range(diameter):
+#             for j in range(diameter):
+#                 # just go from -radius to +radius
+#                 neighbor_t = t - (radius - i)
+#                 if neighbor_t >= len(allPoints_noised):
+#                     # don't apply in this case
+#                     continue
+                
+#                 # get the curNeighbor point
+#                 curNeighbor = allPoints_noised[neighbor_t]
+#                 # two gaussians
+#                 g_dist = gaussian(distance(curPoint, curNeighbor), sigma_dist)
+#                 g_feat = gaussian(allFeatures[neighbor_t] - allFeatures[t], sigma_feature)
+#                 # Bilateral filter is the multiplication of the two
+#                 bilateral = g_dist * g_feat
+#                 curFiltered = curFiltered + allFeatures[neighbor_t] * bilateral
+#                 wp = wp + bilateral
+        
+#         # normalize
+#         curFiltered = curFiltered / wp
+#         allFeatures_filterd[t] = curFiltered
 
-            # save to allPoints
-            allPoints_noised_my[i+1, :] = point2New
-
-    return allPoints_noised_my
 
 
 
+
+
+
+
+# new method that treats the third dimension as the intensity in bilateral filter
+# index is the column index of the allPoints_noised that we want to treat as intensity
+def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_feature):
+    # get the input ready
+    # if we are picking the first column as intensity
+    if (index == 0):
+        allPoints = allPoints_noised[:, 1:]
+    elif (index == 1):
+        # all the columns to the left of choses index column
+        allPoints1 = allPoints_noised[:, 0:index]
+        # all the columns to the right of choses index column
+        allPoints2 = allPoints_noised[:, index+1:]
+        # concatenate together
+        allPoints = np.concatenate((allPoints1, allPoints2), axis=1)
+    elif (index == 2):
+        allPoints = allPoints_noised[:, 0:index]
+
+    # now we treat the index-column as the intensity
+    intensity = allPoints_noised[:, index]
+
+    # initialize the filtered result
+    intensityFiltered = np.zeros(intensity.shape)
+    curFiltered = 0
+
+    # iterate through all the points
+    for t in range(len(allPoints)):
+        curPoint = allPoints_noised[t]
+        wp = 0
+
+        # radius, which is used in the loop 
+        radius = diameter/2
+        for i in range(diameter):
+            # just go from -radius to +radius
+            neighbor_t = t - (radius - i)
+            if neighbor_t >= len(allPoints_noised):
+                # don't apply in this case
+                continue
+            
+            # get the curNeighbor point
+            curNeighbor = allPoints[neighbor_t]
+            # two gaussians
+            g_dist = gaussian(distance(curPoint, curNeighbor), sigma_dist)
+            g_feat = gaussian((intensity[neighbor_t] - intensity[t]), sigma_feature)
+            # Bilateral filter is the multiplication of the two
+            bilateral = g_dist * g_feat
+            curFiltered = curFiltered + intensity[neighbor_t] * bilateral
+            wp = wp + bilateral
+        
+        # normalize
+        curFiltered = curFiltered / wp
+        intensityFiltered[t] = curFiltered
+
+        # now put it back
+        # initialize output
+        allPoints_filtered = np.zeros(allPoints_noised.shape)
+        for i in range(len(allPoints_filtered)):
+            if (index == 0):
+                allPoints_filtered[i, 0] = intensity[i]
+                allPoints_filtered[i, 1] = allPoints[i, 0]
+                allPoints_filtered[i, 2] = allPoints[i, 1]
+            elif (index == 1):
+                # all the columns to the left of choses index column
+                allPoints1 = allPoints[:, 0]
+                # all the columns to the right of choses index column
+                allPoints2 = allPoints[:, 1]
+                # concatenate together
+                allPoints_filtered[i, 0] = allPoints1[i]
+                allPoints_filtered[i, 1] = intensityFiltered[i]
+                allPoints_filtered[i, 2] = allPoints2[i]
+            elif (index == 2):
+                allPoints_filtered[i, 0] = allPoints[i, 0]
+                allPoints_filtered[i, 1] = allPoints[i, 1]
+                allPoints_filtered[i, 2] = intensity[i]
+
+        # return the smoothed points
+        return allPoints_filtered
 
 def main(argv):
     print_help()
@@ -268,9 +372,9 @@ def main(argv):
         ndimage.gaussian_filter1d(x, 1)
 
         # add noise to current points
-        x_noised = addGaussianNoise(x, sigma_noise)
-        y_noised = addGaussianNoise(y, sigma_noise)
-        z_noised = addGaussianNoise(z, sigma_noise)
+        x_noised = addGaussianNoise(x, 0, sigma_noise)
+        y_noised = addGaussianNoise(y, 0, sigma_noise)
+        z_noised = addGaussianNoise(z, 0, sigma_noise)
 
         # combine gaussian filtered noisy points together
         allPoints_noised = np.zeros((len(theta), 3))
@@ -289,7 +393,7 @@ def main(argv):
         allPoints_noised_gauss[:, 2] = z_noised_gauss
 
         # filter the noise with this new method
-        allPoints_noised_my = mySmooth(allPoints_noised)
+        allPoints_noised_my = customized_Bilateral(allPoints_noised, 1, 10, 1, 1)
         x_noised_my = allPoints_noised_my[:, 0]
         y_noised_my = allPoints_noised_my[:, 1]
         z_noised_my = allPoints_noised_my[:, 2]
@@ -317,16 +421,16 @@ def main(argv):
         newK1_noised_my = ndimage.gaussian_filter1d(newK1_noised_my, sigma_smooth)
         
 
-        # newK2 of original dataset
-        newK2 = computeNewCharacter2(allPoints)
-        # get the newK2 of the synthetic dataset after Gaussian smooth
-        newK2_noised_gauss = computeNewCharacter2(allPoints_noised_gauss)
-        # also gaussian smooth the newK2 result
-        newK2_noised_gauss = ndimage.gaussian_filter1d(newK2_noised_gauss, sigma_smooth)
-        # get the newK2 of the synthetic dataset after Gaussian smooth
-        newK2_noised_my = computeNewCharacter2(allPoints_noised_my)
-        # also gaussian smooth the newK2 result
-        newK2_noised_my = ndimage.gaussian_filter1d(newK2_noised_my, sigma_smooth)
+        # # newK2 of original dataset
+        # newK2 = computeNewCharacter2(allPoints)
+        # # get the newK2 of the synthetic dataset after Gaussian smooth
+        # newK2_noised_gauss = computeNewCharacter2(allPoints_noised_gauss)
+        # # also gaussian smooth the newK2 result
+        # newK2_noised_gauss = ndimage.gaussian_filter1d(newK2_noised_gauss, sigma_smooth)
+        # # get the newK2 of the synthetic dataset after Gaussian smooth
+        # newK2_noised_my = computeNewCharacter2(allPoints_noised_my)
+        # # also gaussian smooth the newK2 result
+        # newK2_noised_my = ndimage.gaussian_filter1d(newK2_noised_my, sigma_smooth)
 
 
 
@@ -372,17 +476,17 @@ def main(argv):
             plt.xlabel('theta')
             plt.ylabel('newK1')
 
-            # newK2 based
-            fig4 = plt.figure(4, figsize=(8, 6))
-            ax2 = fig4.add_subplot(111)
-            ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
-            plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
-            plt.legend(('Original', 'Noised'))
-            myTitle = 'Synthetic helix sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK2, newK2_noised_gauss))
-            plt.title(myTitle)
-            # plt.axis([0, theta_max, 0, 1])
-            plt.xlabel('theta')
-            plt.ylabel('newK2')
+            # # newK2 based
+            # fig4 = plt.figure(4, figsize=(8, 6))
+            # ax2 = fig4.add_subplot(111)
+            # ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
+            # plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
+            # plt.legend(('Original', 'Noised'))
+            # myTitle = 'Synthetic helix sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time\nSigma=' + str(sigma_noise) + '\nRMS =' + str(computeRMS(newK2, newK2_noised_gauss))
+            # plt.title(myTitle)
+            # # plt.axis([0, theta_max, 0, 1])
+            # plt.xlabel('theta')
+            # plt.ylabel('newK2')
 
         # plots all together
         fig5 = plt.figure(5, figsize=(10, 8))
@@ -426,17 +530,17 @@ def main(argv):
         plt.xlabel('theta')
         plt.ylabel('newK1')
 
-        # newK2 based
-        ax2 = fig5.add_subplot(224)
-        ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
-        plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
-        plt.plot(theta[2:len(theta)-2], newK2_noised_my[2:len(newK2_noised_my)-2])
-        plt.legend(('Original', 'Noised after Gauss smooth', 'Noised after my smooth'))
-        myTitle = 'sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time'
-        plt.title(myTitle)
-        # plt.axis([0, theta_max, 0, 1])
-        plt.xlabel('theta')
-        plt.ylabel('newK2')
+        # # newK2 based
+        # ax2 = fig5.add_subplot(224)
+        # ax2.plot(theta[2:len(theta)-2], newK2[2:len(curvature)-2])
+        # plt.plot(theta[2:len(theta)-2], newK2_noised_gauss[2:len(newK2_noised_gauss)-2])
+        # plt.plot(theta[2:len(theta)-2], newK2_noised_my[2:len(newK2_noised_my)-2])
+        # plt.legend(('Original', 'Noised after Gauss smooth', 'Noised after my smooth'))
+        # myTitle = 'sqrt(||U_d(t)||^2 + ||L_d(t)||^2) / ||r_d(t)|| vs time'
+        # plt.title(myTitle)
+        # # plt.axis([0, theta_max, 0, 1])
+        # plt.xlabel('theta')
+        # plt.ylabel('newK2')
 
         # show the images
         plt.show()
@@ -463,9 +567,9 @@ def main(argv):
         allPositions_follower = allPositions_pioneer
         # all time stamp plus 10
         time_follower = allPositions_follower[:,0] + timeShift
-        x_follower = addGaussianNoise(x_pioneer, sigma_noise)
-        y_follower = addGaussianNoise(y_pioneer, sigma_noise)
-        z_follower = addGaussianNoise(z_pioneer, sigma_noise)
+        x_follower = addGaussianNoise(x_pioneer, 0, sigma_noise)
+        y_follower = addGaussianNoise(y_pioneer, 0, sigma_noise)
+        z_follower = addGaussianNoise(z_pioneer, 0, sigma_noise)
 
         # 3D scatter plot of followers
         plot3D(2, time_follower, x_follower, y_follower, z_follower, 'Follower locations vs t')
@@ -497,9 +601,9 @@ def main(argv):
                 allPositions_follower = allPositions_pioneer
                 # all time stamp plus 10
                 time_follower = allPositions_follower[:,0] + timeShift
-                x_follower = addGaussianNoise(x_pioneer, sigma_noise)
-                y_follower = addGaussianNoise(y_pioneer, sigma_noise)
-                z_follower = addGaussianNoise(z_pioneer, sigma_noise)
+                x_follower = addGaussianNoise(x_pioneer, 0, sigma_noise)
+                y_follower = addGaussianNoise(y_pioneer, 0, sigma_noise)
+                z_follower = addGaussianNoise(z_pioneer, 0, sigma_noise)
 
                 curvature_follower = computeCurvature(allPositions_follower)
                 curSumRMS = curSumRMS + computeRMS(curvature_pioneer, curvature_follower)

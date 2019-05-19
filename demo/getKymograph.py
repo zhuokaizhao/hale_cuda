@@ -10,6 +10,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from scipy import fftpack, ndimage, signal
 import math
+from numpy import linalg as LA
+from sklearn import preprocessing
 
 def print_help():
     print('''    
@@ -206,6 +208,8 @@ def distance(p1, p2):
     # dimension check
     if (len(p1) != len(p2)):
         print('Could not compute distance between p1 and p2, incompatible dimension')
+        print('p1 has length ' + str(len(p1)))
+        print('p2 has length ' + str(len(p2)))
         return dist
 
     sum = 0
@@ -259,10 +263,36 @@ def gaussian(x, sigma):
 #         curFiltered = curFiltered / wp
 #         allFeatures_filterd[t] = curFiltered
 
+# the function implements the algorithm explained in the PDF
+def novelDenoise(allPoints_noised, sigma_dist, sigma_feature, range):
+    # first we find the PCA of the noised points
+    pca = PCA(n_components=3)
+    pca.fit(allPoints_noised)
+    # choose the second as pseudo side vector
+    v1_vect = pca.components_[0]
+    v2_vect = pca.components_[1]
+    v3_vect = pca.components_[2]
 
+    # then iterate all points in the path, starting with the 2nd
+    for i in range(1, len(allPoints_noised)):
+        # current point and previous point
+        p_cur = allPoints_noised[i, :]
+        p_prev = allPoints_noised[i-1, :]
+        # construct vector between the two points
+        p_vect = p_cur - p_prev
+        # move the PCA vector to be rooted the same as pk_rect
+        v1_cur_vect = p_prev + v1_vect
+        v2_cur_vect = p_prev + v2_vect
+        v3_cur_vect = p_prev + v3_vect
+        # project p_vect onto these PCA vectors, which are vectors with respect to p_prev
+        p_v1_vect = np.dot(p_vect, v1_cur_vect) * preprocessing.normalize(v1_cur_vect)
+        p_v2_vect = np.dot(p_vect, v2_cur_vect) * preprocessing.normalize(v2_cur_vect)
+        p_v3_vect = np.dot(p_vect, v3_cur_vect) * preprocessing.normalize(v3_cur_vect)
 
-
-
+        # construt q vector
+        q_v1_vect = p_vect - p_v1_vect
+        q_v2_vect = p_vect - p_v2_vect
+        q_v3_vect = p_vect - p_v3_vect
 
 
 
@@ -279,7 +309,10 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
         # all the columns to the right of choses index column
         allPoints2 = allPoints_noised[:, index+1:]
         # concatenate together
-        allPoints = np.concatenate((allPoints1, allPoints2), axis=1)
+        allPoints = np.zeros((len(allPoints_noised), 2))
+        for i in range(len(allPoints)):
+            allPoints[i, 0] = allPoints1[i]
+            allPoints[i, 1] = allPoints2[i]
     elif (index == 2):
         allPoints = allPoints_noised[:, 0:index]
 
@@ -292,29 +325,35 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
 
     # iterate through all the points
     for t in range(len(allPoints)):
-        curPoint = allPoints_noised[t]
+        curPoint = allPoints[t, :]
         wp = 0
 
         # radius, which is used in the loop 
-        radius = diameter/2
+        radius = int(diameter/2)
         for i in range(diameter):
             # just go from -radius to +radius
             neighbor_t = t - (radius - i)
+            # boundary check
             if neighbor_t >= len(allPoints_noised):
-                # don't apply in this case
+                continue
+            if neighbor_t <= 0:
                 continue
             
             # get the curNeighbor point
-            curNeighbor = allPoints[neighbor_t]
+            curNeighbor = allPoints[neighbor_t, :]
             # two gaussians
+            # use the distance between as input to a Gaussian, assumed zero mean
             g_dist = gaussian(distance(curPoint, curNeighbor), sigma_dist)
+            # use the intensity difference as input to a Gaussian, assumed zero mean
             g_feat = gaussian((intensity[neighbor_t] - intensity[t]), sigma_feature)
             # Bilateral filter is the multiplication of the two
             bilateral = g_dist * g_feat
+            # sum up the filtered value of the current near neighbor
             curFiltered = curFiltered + intensity[neighbor_t] * bilateral
+            # sum up the filter value of the current neighbor
             wp = wp + bilateral
         
-        # normalize
+        # weighted average of intensity values from nearby pixels
         curFiltered = curFiltered / wp
         intensityFiltered[t] = curFiltered
 
@@ -343,6 +382,20 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
         # return the smoothed points
         return allPoints_filtered
 
+
+# helper function that draws a helix
+def drawHelix(theta_max, numPoints):
+    theta = np.linspace(0, theta_max, numPoints)
+    x =  np.cos(theta)
+    y =  np.sin(theta)
+    z = theta
+    allPoints = np.zeros((len(theta), 3))
+    allPoints[:, 0] = x
+    allPoints[:, 1] = y
+    allPoints[:, 2] = z
+
+    return allPoints, theta
+
 def main(argv):
     print_help()
     mode = argv[0] if len(argv) > 0 else 'synthetic'
@@ -361,42 +414,22 @@ def main(argv):
 
         # Plot a right-hand helix along the z-axis
         theta_max = 8 * np.pi
-        theta = np.linspace(0, theta_max, n)
-        x =  np.cos(theta)
-        y =  np.sin(theta)
-        z = theta
-        allPoints = np.zeros((len(theta), 3))
-        allPoints[:, 0] = x
-        allPoints[:, 1] = y
-        allPoints[:, 2] = z
-        ndimage.gaussian_filter1d(x, 1)
+        allPoints, theta = drawHelix(theta_max, n)
 
         # add noise to current points
-        x_noised = addGaussianNoise(x, 0, sigma_noise)
-        y_noised = addGaussianNoise(y, 0, sigma_noise)
-        z_noised = addGaussianNoise(z, 0, sigma_noise)
-
-        # combine gaussian filtered noisy points together
-        allPoints_noised = np.zeros((len(theta), 3))
-        allPoints_noised[:, 0] = x_noised
-        allPoints_noised[:, 1] = y_noised
-        allPoints_noised[:, 2] = z_noised
+        allPoints_noised = np.zeros((len(allPoints), 3))
+        allPoints_noised[:, 0] = addGaussianNoise(allPoints[:,0], 0, sigma_noise)
+        allPoints_noised[:, 1] = addGaussianNoise(allPoints[:,1], 0, sigma_noise)
+        allPoints_noised[:, 2] = addGaussianNoise(allPoints[:,2], 0, sigma_noise)
 
         # filter the noise with Gaussian filter
-        x_noised_gauss = ndimage.gaussian_filter1d(x_noised, sigma_smooth)
-        y_noised_gauss = ndimage.gaussian_filter1d(y_noised, sigma_smooth)
-        z_noised_gauss = ndimage.gaussian_filter1d(z_noised, sigma_smooth)
-        # combine gaussian filtered noisy points together
-        allPoints_noised_gauss = np.zeros((len(theta), 3))
-        allPoints_noised_gauss[:, 0] = x_noised_gauss
-        allPoints_noised_gauss[:, 1] = y_noised_gauss
-        allPoints_noised_gauss[:, 2] = z_noised_gauss
+        allPoints_noised_gauss = np.zeros((len(allPoints), 3))
+        allPoints_noised_gauss[:, 0] = ndimage.gaussian_filter1d(allPoints_noised[:, 0], sigma_smooth)
+        allPoints_noised_gauss[:, 1] = ndimage.gaussian_filter1d(allPoints_noised[:, 1], sigma_smooth)
+        allPoints_noised_gauss[:, 2] = ndimage.gaussian_filter1d(allPoints_noised[:, 2], sigma_smooth)
 
         # filter the noise with this new method
-        allPoints_noised_my = customized_Bilateral(allPoints_noised, 1, 10, 1, 1)
-        x_noised_my = allPoints_noised_my[:, 0]
-        y_noised_my = allPoints_noised_my[:, 1]
-        z_noised_my = allPoints_noised_my[:, 2]
+        allPoints_noised_novel = customized_Bilateral(allPoints_noised, 1, 10, 1, 1)
 
         # curvature of original dataset
         curvature = computeCurvature(allPoints)
@@ -405,7 +438,7 @@ def main(argv):
         # also gaussian smooth the curvature result
         curvature_noised_gauss = ndimage.gaussian_filter1d(curvature_noised_gauss, sigma_smooth)
         # get the curvature of synthetic dataset after my smooth
-        curvature_noised_my = computeCurvature(allPoints_noised_my)
+        curvature_noised_my = computeCurvature(allPoints_noised_novel)
         # also gaussian smooth the my result
         curvature_noised_my = ndimage.gaussian_filter1d(curvature_noised_my, sigma_smooth)
         
@@ -416,7 +449,7 @@ def main(argv):
         # also gaussian smooth the newK1 result
         newK1_noised_gauss = ndimage.gaussian_filter1d(newK1_noised_gauss, sigma_smooth)
         # get the newK1 of the synthetic dataset after my smooth
-        newK1_noised_my = computeNewCharacter1(allPoints_noised_my)
+        newK1_noised_my = computeNewCharacter1(allPoints_noised_novel)
         # also gaussian smooth the newK1 result
         newK1_noised_my = ndimage.gaussian_filter1d(newK1_noised_my, sigma_smooth)
         
@@ -441,8 +474,9 @@ def main(argv):
             # make the plot
             fig1 = plt.figure(1, figsize=(8, 6))
             ax1 = fig1.add_subplot(111, projection='3d')
-            ax1.plot(x, y, z, 'b', lw=2)
-            ax1.plot(x_noised_gauss, y_noised_gauss, z_noised, 'r', lw=2)
+            ax1.plot(allPoints[:,0], allPoints[:,1], allPoints[:,2], 'b', lw=2)
+            ax1.plot(allPoints_noised_gauss[:, 0], allPoints_noised_gauss[:, 1], allPoints_noised_gauss[:, 2], 'r', lw=2)
+            ax1.plot(allPoints_noised_novel[:, 0], allPoints_noised_novel[:, 1], allPoints_noised_novel[:, 2], 'r', lw=2)
             # plot the pseudo-side vector
             # get the pseudo side vector first
             S = computePseudoSideVector(allPoints)
@@ -492,11 +526,11 @@ def main(argv):
         fig5 = plt.figure(5, figsize=(10, 8))
         ax1 = fig5.add_subplot(221, projection='3d')
         # original unnoised data
-        ax1.plot(x, y, z, 'b', lw=2)
+        ax1.plot(allPoints[:,0], allPoints[:,1], allPoints[:,2], 'b', lw=2)
         # noised data after gaussian smooth
-        ax1.plot(x_noised_gauss, y_noised_gauss, z_noised_gauss, 'r', lw=2)
+        ax1.plot(allPoints_noised_gauss[:, 0], allPoints_noised_gauss[:, 1], allPoints_noised_gauss[:, 2], 'r', lw=2)
         # noised data after my smooth method
-        ax1.plot(x_noised_my, y_noised_my, z_noised_my, 'r', lw=2)
+        ax1.plot(allPoints_noised_novel[:, 0], allPoints_noised_novel[:, 1], allPoints_noised_novel[:, 2], 'r', lw=2)
         # plot the pseudo-side vector
         # get the pseudo side vector first
         S = computePseudoSideVector(allPoints)

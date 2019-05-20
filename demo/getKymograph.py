@@ -202,7 +202,7 @@ def plot3D(i, time, x, y, z, myTitle):
     plt.title(myTitle)
 
 # helper function that computes the Euclidean distance between two points
-def distance(p1, p2):
+def computeDist(p1, p2):
     dist = 0
     # dimension check
     if (len(p1) != len(p2)):
@@ -309,7 +309,7 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
             curNeighbor = allPoints[neighbor_t, :]
             # two gaussians
             # use the distance between as input to a Gaussian, assumed zero mean
-            g_dist = gaussian(distance(curPoint, curNeighbor), sigma_dist)
+            g_dist = gaussian(computeDist(curPoint, curNeighbor), sigma_dist)
             # use the intensity difference as input to a Gaussian, assumed zero mean
             g_feat = gaussian((intensity[neighbor_t] - intensity[t]), sigma_feature)
             # Bilateral filter is the multiplication of the two
@@ -348,33 +348,14 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
         # return the smoothed points
         return allPoints_filtered
 
-# 3D bilateral filter
-# Input:
-#   current point p_cur
-#   previous point p_prev
-#   sigma for distance
-#   sigma for intensity
-def bilateral3D(p_cur, p_prev, d, sigma_dist, sigma_intensity):
-    q_new = 0
-
-    return q_new
-
-
-# the function implements the algorithm explained in the PDF
-def novelDenoise(allPoints_noised, sigma_dist, sigma_intensity, d):
-    # first we find the PCA of the noised points
-    pca = PCA(n_components=3)
-    pca.fit(allPoints_noised)
-    # choose the second as pseudo side vector
-    v1_vect = pca.components_[0]
-    v2_vect = pca.components_[1]
-    v3_vect = pca.components_[2]
-
-    # then iterate all points in the path, starting with the 2nd
-    for i in range(1, len(allPoints_noised)):
+def computePQ(allPoints, v1_vect, v2_vect, v3_vect):
+    P = np.zeros(len(allPoints), 9)
+    Q = np.zeros(allPoints.shape)
+    # we can't compute for the first point, keep q to be 0
+    for i in range(1, len(allPoints)):
         # current point and previous point
-        p_cur = allPoints_noised[i, :]
-        p_prev = allPoints_noised[i-1, :]
+        p_cur = allPoints[i, :]
+        p_prev = allPoints[i-1, :]
         # construct vector between the two points
         p_vect = p_cur - p_prev
         # move the PCA vector to be rooted the same as p_vect
@@ -390,6 +371,7 @@ def novelDenoise(allPoints_noised, sigma_dist, sigma_intensity, d):
         q_v2_vect = p_vect - p_v2_vect
         q_v3_vect = p_vect - p_v3_vect
         # since all p_v#_vect are all rooted at p_prev, we transform it to be based on Euclidean origin
+        # Notice that this would be the new point we pair with Q[i]
         p_v1 = p_prev + p_v1_vect
         p_v2 = p_prev + p_v2_vect
         p_v3 = p_prev + p_v3_vect
@@ -397,9 +379,72 @@ def novelDenoise(allPoints_noised, sigma_dist, sigma_intensity, d):
         q_v1 = np.linalg.norm(q_v1_vect)
         q_v2 = np.linalg.norm(q_v2_vect)
         q_v3 = np.linalg.norm(q_v3_vect)
+        # pack them into P
+        P[i, 0:3] = p_v1
+        P[i, 3:6] = p_v2
+        P[i, 6:9] = p_v3
+        # pack them into Q
+        Q[i, 0] = q_v1
+        Q[i, 1] = q_v2
+        Q[i, 2] = q_v3
+
+    return P, Q
+
+# 3D bilateral filter
+# Input:
+#   current point p_cur
+#   previous point p_prev
+#   
+#   sigma for distance
+#   sigma for intensity
+def bilateral3D(p_cur, p_prev, q_cur, q_prev, d, sigma_dist, sigma_intensity):
+    q_new = 0
+    # the euclidean distance between p_cur and p_prev
+    dist = computeDist(p_cur, p_prev)
+    # intensity difference between two points
+
+
+    return q_new
+
+
+# the function implements the algorithm explained in the PDF
+def novelDenoise(allPoints_noised, sigma_dist, sigma_intensity, d):
+    # first we find the PCA of the noised points
+    pca = PCA(n_components=3)
+    pca.fit(allPoints_noised)
+    # choose the second as pseudo side vector
+    v1_vect = pca.components_[0]
+    v2_vect = pca.components_[1]
+    v3_vect = pca.components_[2]
+
+    # precompute all the p_v1, p_v2 and p_v3
+    # precompute all the q_v1, q_v2 and q_v3
+    # P is n*9, where for each row, it is [(p_v1_x, p_v1_y, p_v1_z), (p_v2_x, p_v2_y, p_v2_z), (p_v3_x, p_v3_y, p_v3_z)]
+    # Q is n*3, where for each row, it is [q_v1, q_v2, q_v3]
+    P, Q = computePQ(allPoints_noised, v1_vect, v2_vect, v3_vect)
+
+    # then iterate all points in the path, starting with the 2nd
+    for i in range(1, len(allPoints_noised)):
+        # All P and Q have been pre-computed
+        p_v1_cur = P[i, 0:3]
+        p_v2_cur = P[i, 3:6]
+        p_v3_cur = P[i, 6:9]
+        p_v1_prev = P[i-1, 0:3]
+        p_v2_prev = P[i-1, 3:6]
+        p_v3_prev = P[i-1, 6:9]
+
+        q_v1_cur = Q[i, 0:3]
+        q_v2_cur = Q[i, 3:6]
+        q_v3_cur = Q[i, 6:9]
+        q_v1_prev = Q[i-1, 0:3]
+        q_v2_prev = Q[i-1, 3:6]
+        q_v3_prev = Q[i-1, 6:9]
         
         # now we've had everything, we do denoising
-        q_v1_new = bilateral3D(p_cur, p_prev, d, sigma_dist, sigma_intensity)
+        q_v1_new = bilateral3D(p_v1_cur, p_v1_prev, q_v1_cur, q_v1_prev, d, sigma_dist, sigma_intensity)
+        q_v2_new = bilateral3D(p_v2_cur, p_v2_prev, q_v2_cur, q_v2_prev, d, sigma_dist, sigma_intensity)
+        q_v3_new = bilateral3D(p_v3_cur, p_v3_prev, q_v3_cur, q_v3_prev, d, sigma_dist, sigma_intensity)
+
 
 
 # helper function that draws a helix

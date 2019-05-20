@@ -10,7 +10,6 @@ from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from scipy import fftpack, ndimage, signal
 import math
-from numpy import linalg as LA
 from sklearn import preprocessing
 
 def print_help():
@@ -263,39 +262,6 @@ def gaussian(x, sigma):
 #         curFiltered = curFiltered / wp
 #         allFeatures_filterd[t] = curFiltered
 
-# the function implements the algorithm explained in the PDF
-def novelDenoise(allPoints_noised, sigma_dist, sigma_feature, range):
-    # first we find the PCA of the noised points
-    pca = PCA(n_components=3)
-    pca.fit(allPoints_noised)
-    # choose the second as pseudo side vector
-    v1_vect = pca.components_[0]
-    v2_vect = pca.components_[1]
-    v3_vect = pca.components_[2]
-
-    # then iterate all points in the path, starting with the 2nd
-    for i in range(1, len(allPoints_noised)):
-        # current point and previous point
-        p_cur = allPoints_noised[i, :]
-        p_prev = allPoints_noised[i-1, :]
-        # construct vector between the two points
-        p_vect = p_cur - p_prev
-        # move the PCA vector to be rooted the same as pk_rect
-        v1_cur_vect = p_prev + v1_vect
-        v2_cur_vect = p_prev + v2_vect
-        v3_cur_vect = p_prev + v3_vect
-        # project p_vect onto these PCA vectors, which are vectors with respect to p_prev
-        p_v1_vect = np.dot(p_vect, v1_cur_vect) * preprocessing.normalize(v1_cur_vect)
-        p_v2_vect = np.dot(p_vect, v2_cur_vect) * preprocessing.normalize(v2_cur_vect)
-        p_v3_vect = np.dot(p_vect, v3_cur_vect) * preprocessing.normalize(v3_cur_vect)
-
-        # construt q vector
-        q_v1_vect = p_vect - p_v1_vect
-        q_v2_vect = p_vect - p_v2_vect
-        q_v3_vect = p_vect - p_v3_vect
-
-
-
 # new method that treats the third dimension as the intensity in bilateral filter
 # index is the column index of the allPoints_noised that we want to treat as intensity
 def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_feature):
@@ -381,6 +347,59 @@ def customized_Bilateral(allPoints_noised, index, diameter, sigma_dist, sigma_fe
 
         # return the smoothed points
         return allPoints_filtered
+
+# 3D bilateral filter
+# Input:
+#   current point p_cur
+#   previous point p_prev
+#   sigma for distance
+#   sigma for intensity
+def bilateral3D(p_cur, p_prev, d, sigma_dist, sigma_intensity):
+    q_new = 0
+
+    return q_new
+
+
+# the function implements the algorithm explained in the PDF
+def novelDenoise(allPoints_noised, sigma_dist, sigma_intensity, d):
+    # first we find the PCA of the noised points
+    pca = PCA(n_components=3)
+    pca.fit(allPoints_noised)
+    # choose the second as pseudo side vector
+    v1_vect = pca.components_[0]
+    v2_vect = pca.components_[1]
+    v3_vect = pca.components_[2]
+
+    # then iterate all points in the path, starting with the 2nd
+    for i in range(1, len(allPoints_noised)):
+        # current point and previous point
+        p_cur = allPoints_noised[i, :]
+        p_prev = allPoints_noised[i-1, :]
+        # construct vector between the two points
+        p_vect = p_cur - p_prev
+        # move the PCA vector to be rooted the same as p_vect
+        v1_cur_vect = p_prev + v1_vect
+        v2_cur_vect = p_prev + v2_vect
+        v3_cur_vect = p_prev + v3_vect
+        # project p_vect onto these PCA vectors, which are vectors with respect to p_prev
+        p_v1_vect = np.dot(p_vect, v1_cur_vect) * preprocessing.normalize(v1_cur_vect)
+        p_v2_vect = np.dot(p_vect, v2_cur_vect) * preprocessing.normalize(v2_cur_vect)
+        p_v3_vect = np.dot(p_vect, v3_cur_vect) * preprocessing.normalize(v3_cur_vect)
+        # construt q vector, which is perpendicular to v_cur_vect
+        q_v1_vect = p_vect - p_v1_vect
+        q_v2_vect = p_vect - p_v2_vect
+        q_v3_vect = p_vect - p_v3_vect
+        # since all p_v#_vect are all rooted at p_prev, we transform it to be based on Euclidean origin
+        p_v1 = p_prev + p_v1_vect
+        p_v2 = p_prev + p_v2_vect
+        p_v3 = p_prev + p_v3_vect
+        # norm of q vectors
+        q_v1 = np.linalg.norm(q_v1_vect)
+        q_v2 = np.linalg.norm(q_v2_vect)
+        q_v3 = np.linalg.norm(q_v3_vect)
+        
+        # now we've had everything, we do denoising
+        q_v1_new = bilateral3D(p_cur, p_prev, d, sigma_dist, sigma_intensity)
 
 
 # helper function that draws a helix
